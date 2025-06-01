@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Label } from "@/components/ui/label"
+import { supabase } from "@/lib/supabase"
 
 export default function HomePage() {
   const router = useRouter()
@@ -27,21 +28,16 @@ export default function HomePage() {
     setSearchError("")
 
     try {
-      // Simulate a delay to represent a network request
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      // Search in database by ID or user number
+      const { data: user, error } = await supabase
+        .from("users")
+        .select("*")
+        .or(`id.ilike.${searchQuery},user_number.eq.${searchQuery}`)
+        .single()
 
-      // Get users from localStorage
-      const storedUsers = localStorage.getItem("penPackingUsers")
-      let allUsers = []
-
-      if (storedUsers) {
-        allUsers = JSON.parse(storedUsers)
+      if (error && error.code !== "PGRST116") {
+        throw error
       }
-
-      // Search by ID or user number
-      const user = allUsers.find(
-        (u: any) => u.id.toLowerCase() === searchQuery.toLowerCase() || u.userNumber === searchQuery,
-      )
 
       if (user) {
         // Redirect to user details page

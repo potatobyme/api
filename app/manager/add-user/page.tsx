@@ -14,10 +14,12 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
+import { supabase } from "@/lib/supabase"
 
 export default function AddUser() {
   const router = useRouter()
   const { toast } = useToast()
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     name: "",
     age: "",
@@ -27,22 +29,61 @@ export default function AddUser() {
     email: "",
   })
 
-  const generateUserId = () => {
-    const timestamp = Date.now().toString().slice(-4)
-    return `PPJ${timestamp}`
+  const generateUserId = async () => {
+    // Get all existing IDs to find the next available one
+    const { data, error } = await supabase.from("users").select("id").order("id", { ascending: false })
+
+    if (error) {
+      console.error("Error fetching user IDs:", error)
+      // Fallback to timestamp-based ID if query fails
+      return `PPJ${Date.now().toString().slice(-6)}`
+    }
+
+    if (!data || data.length === 0) {
+      return "PPJ001"
+    }
+
+    // Extract numbers from all IDs and find the highest
+    const existingNumbers = data
+      .map((user) => {
+        const match = user.id.match(/PPJ(\d+)/)
+        return match ? Number.parseInt(match[1]) : 0
+      })
+      .filter((num) => num > 0)
+
+    const maxNumber = existingNumbers.length > 0 ? Math.max(...existingNumbers) : 0
+    const nextNumber = maxNumber + 1
+
+    return `PPJ${String(nextNumber).padStart(3, "0")}`
   }
 
-  const generateUserNumber = () => {
-    // Get existing users to ensure unique number
-    const existingUsers = JSON.parse(localStorage.getItem("penPackingUsers") || "[]")
-    const existingNumbers = existingUsers.map((user: any) => Number.parseInt(user.userNumber))
+  const generateUserNumber = async () => {
+    // Get all existing user numbers to find the next available one
+    const { data, error } = await supabase
+      .from("users")
+      .select("user_number")
+      .order("user_number", { ascending: false })
 
-    // Find the highest existing number and add 1
+    if (error) {
+      console.error("Error fetching user numbers:", error)
+      // Fallback to timestamp-based number if query fails
+      return Date.now().toString().slice(-4)
+    }
+
+    if (!data || data.length === 0) {
+      return "1001"
+    }
+
+    // Convert all user numbers to integers and find the highest
+    const existingNumbers = data.map((user) => Number.parseInt(user.user_number)).filter((num) => !isNaN(num))
+
     const maxNumber = existingNumbers.length > 0 ? Math.max(...existingNumbers) : 1000
-    return (maxNumber + 1).toString()
+    const nextNumber = maxNumber + 1
+
+    return String(nextNumber)
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
     // Validate form
@@ -55,53 +96,78 @@ export default function AddUser() {
       return
     }
 
-    // Create new user object
-    const newUser = {
-      ...formData,
-      id: generateUserId(),
-      userNumber: generateUserNumber(),
-      status: "pending",
-      registrationDate: new Date().toLocaleDateString("bn-BD", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }),
+    setIsSubmitting(true)
+
+    try {
+      // Generate unique IDs with retry logic
+      let userId = await generateUserId()
+      let userNumber = await generateUserNumber()
+
+      // Double-check for uniqueness
+      const { data: existingUser } = await supabase
+        .from("users")
+        .select("id, user_number")
+        .or(`id.eq.${userId},user_number.eq.${userNumber}`)
+
+      if (existingUser && existingUser.length > 0) {
+        // If there's a conflict, regenerate IDs
+        userId = `PPJ${Date.now().toString().slice(-6)}`
+        userNumber = Date.now().toString().slice(-4)
+      }
+
+      // Create new user object
+      const newUser = {
+        id: userId,
+        user_number: userNumber,
+        name: formData.name,
+        age: Number.parseInt(formData.age),
+        gender: formData.gender,
+        address: formData.address,
+        phone: formData.phone || null,
+        email: formData.email || null,
+        status: "pending" as const,
+      }
+
+      // Insert into database with conflict handling
+      const { error } = await supabase.from("users").insert([newUser])
+
+      if (error) {
+        if (error.code === "23505") {
+          // Unique constraint violation
+          throw new Error("একটি অনন্য আইডি তৈরি করতে সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।")
+        }
+        throw error
+      }
+
+      toast({
+        title: "সফল",
+        description: `ব্যবহারকারী ${userId} সফলভাবে তৈরি করা হয়েছে`,
+      })
+
+      // Reset form
+      setFormData({
+        name: "",
+        age: "",
+        gender: "",
+        address: "",
+        phone: "",
+        email: "",
+      })
+
+      // Redirect back to manager dashboard after a short delay
+      setTimeout(() => {
+        router.push("/manager")
+      }, 1000)
+    } catch (error) {
+      console.error("Error creating user:", error)
+      toast({
+        title: "ত্রুটি",
+        description: error instanceof Error ? error.message : "ব্যবহারকারী তৈরি করতে সমস্যা হয়েছে",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
     }
-
-    // Get existing users from localStorage
-    const existingUsers = JSON.parse(localStorage.getItem("penPackingUsers") || "[]")
-
-    // Add new user to the list
-    const updatedUsers = [...existingUsers, newUser]
-
-    // Save to localStorage
-    localStorage.setItem("penPackingUsers", JSON.stringify(updatedUsers))
-
-    // Dispatch custom event to notify other components
-    const event = new CustomEvent("userAdded", { detail: newUser })
-    window.dispatchEvent(event)
-
-    console.log("New user created:", newUser)
-
-    toast({
-      title: "সফল",
-      description: `ব্যবহারকারী ${newUser.id} সফলভাবে তৈরি করা হয়েছে`,
-    })
-
-    // Reset form
-    setFormData({
-      name: "",
-      age: "",
-      gender: "",
-      address: "",
-      phone: "",
-      email: "",
-    })
-
-    // Redirect back to manager dashboard after a short delay
-    setTimeout(() => {
-      router.push("/manager")
-    }, 1000)
   }
 
   const handleInputChange = (field: string, value: string) => {
@@ -148,6 +214,7 @@ export default function AddUser() {
                       onChange={(e) => handleInputChange("name", e.target.value)}
                       placeholder="পূর্ণ নাম লিখুন"
                       required
+                      disabled={isSubmitting}
                     />
                   </div>
 
@@ -162,13 +229,18 @@ export default function AddUser() {
                       min="18"
                       max="65"
                       required
+                      disabled={isSubmitting}
                     />
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="gender">লিঙ্গ *</Label>
-                  <Select value={formData.gender} onValueChange={(value) => handleInputChange("gender", value)}>
+                  <Select
+                    value={formData.gender}
+                    onValueChange={(value) => handleInputChange("gender", value)}
+                    disabled={isSubmitting}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="লিঙ্গ নির্বাচন করুন" />
                     </SelectTrigger>
@@ -194,6 +266,7 @@ export default function AddUser() {
                     placeholder="সম্পূর্ণ ঠিকানা লিখুন"
                     className="min-h-[80px]"
                     required
+                    disabled={isSubmitting}
                   />
                 </div>
 
@@ -206,6 +279,7 @@ export default function AddUser() {
                       value={formData.phone}
                       onChange={(e) => handleInputChange("phone", e.target.value)}
                       placeholder="+880 1712-345678"
+                      disabled={isSubmitting}
                     />
                   </div>
 
@@ -217,6 +291,7 @@ export default function AddUser() {
                       value={formData.email}
                       onChange={(e) => handleInputChange("email", e.target.value)}
                       placeholder="user@example.com"
+                      disabled={isSubmitting}
                     />
                   </div>
                 </div>
@@ -225,11 +300,13 @@ export default function AddUser() {
               {/* Submit Button */}
               <div className="flex justify-end space-x-4 pt-6">
                 <Link href="/manager">
-                  <Button variant="outline">বাতিল</Button>
+                  <Button variant="outline" disabled={isSubmitting}>
+                    বাতিল
+                  </Button>
                 </Link>
-                <Button type="submit">
+                <Button type="submit" disabled={isSubmitting}>
                   <Save className="h-4 w-4 mr-2" />
-                  ব্যবহারকারী নিবন্ধন করুন
+                  {isSubmitting ? "সংরক্ষণ করা হচ্ছে..." : "ব্যবহারকারী নিবন্ধন করুন"}
                 </Button>
               </div>
             </form>

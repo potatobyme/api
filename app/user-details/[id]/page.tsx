@@ -7,27 +7,21 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { supabase, type User } from "@/lib/supabase"
 
 export default function UserDetailsPage({ params }: { params: { id: string } }) {
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
     const fetchUser = async () => {
       setIsLoading(true)
       try {
-        await new Promise((resolve) => setTimeout(resolve, 500))
+        const { data: userData, error } = await supabase.from("users").select("*").eq("id", params.id).single()
 
-        const storedUsers = localStorage.getItem("penPackingUsers")
-        let allUsers = []
-
-        if (storedUsers) {
-          allUsers = JSON.parse(storedUsers)
+        if (error && error.code !== "PGRST116") {
+          throw error
         }
-
-        const userData = allUsers.find(
-          (u: any) => u.id.toLowerCase() === params.id.toLowerCase() || u.userNumber === params.id,
-        )
 
         if (userData) {
           setUser(userData)
@@ -52,17 +46,17 @@ export default function UserDetailsPage({ params }: { params: { id: string } }) 
 
 নাম: ${user.name}
 ইউজার আইডি: ${user.id}
-ইউজার নম্বর: ${user.userNumber}
+ইউজার নম্বর: ${user.user_number}
 বয়স: ${user.age} বছর
 লিঙ্গ: ${user.gender}
 ঠিকানা: ${user.address}
-ফোন: ${user.phone}
+ফোন: ${user.phone || "প্রদান করা হয়নি"}
 ইমেইল: ${user.email || "প্রদান করা হয়নি"}
 
-রেজিস্ট্রেশন তারিখ: ${user.registrationDate}
-স্ট্যাটাস: ${user.status === "approved" ? "অনুমোদিত ✓" : "অপেক্ষমান"}
+রেজিস্ট্রেশন তারিখ: ${new Date(user.registration_date).toLocaleDateString("bn-BD")}
+স্ট্যাটাস: ${user.status === "approved" ? "অনুমোদিত ✓" : user.status === "pending" ? "অপেক্ষমান" : "প্রত্যাখ্যাত"}
 
-${user.status === "approved" ? "এই ব্যক্তি পেন প্যাকিং কাজের জন্য অনুমোদিত এবং কাজ শুরু করতে পারেন।" : "এই আবেদনটি এখনও পর্যালোচনাধীন রয়েছে।"}
+${user.status === "approved" ? "এই ব্যক্তি পেন প্যাকিং কাজের জন্য অনুমোদিত এবং কাজ শুরু করতে পারেন।" : user.status === "pending" ? "এই আবেদনটি এখনও পর্যালোচনাধীন রয়েছে।" : "এই আবেদনটি প্রত্যাখ্যাত হয়েছে।"}
 
 জারি করা হয়েছে: ${new Date().toLocaleDateString("bn-BD")}
 
@@ -156,9 +150,13 @@ ${user.status === "approved" ? "এই ব্যক্তি পেন প্য
                 <div className="bg-green-500 text-white px-4 py-2 rounded-full text-sm font-bold transform rotate-12 shadow-lg">
                   অনুমোদিত ✓
                 </div>
-              ) : (
+              ) : user.status === "pending" ? (
                 <div className="bg-orange-500 text-white px-4 py-2 rounded-full text-sm font-bold transform rotate-12 shadow-lg">
                   অপেক্ষমান
+                </div>
+              ) : (
+                <div className="bg-red-500 text-white px-4 py-2 rounded-full text-sm font-bold transform rotate-12 shadow-lg">
+                  প্রত্যাখ্যাত
                 </div>
               )}
             </div>
@@ -169,7 +167,13 @@ ${user.status === "approved" ? "এই ব্যক্তি পেন প্য
 
           {/* Status Banner */}
           <div
-            className={`p-4 text-center ${user.status === "approved" ? "bg-green-50 border-green-200" : "bg-orange-50 border-orange-200"} border-b`}
+            className={`p-4 text-center ${
+              user.status === "approved"
+                ? "bg-green-50 border-green-200"
+                : user.status === "pending"
+                  ? "bg-orange-50 border-orange-200"
+                  : "bg-red-50 border-red-200"
+            } border-b`}
           >
             <div className="flex items-center justify-center space-x-2">
               {user.status === "approved" ? (
@@ -177,10 +181,15 @@ ${user.status === "approved" ? "এই ব্যক্তি পেন প্য
                   <CheckCircle className="h-6 w-6 text-green-600" />
                   <span className="text-green-800 font-semibold text-lg">আপনার আবেদন অনুমোদিত হয়েছে</span>
                 </>
-              ) : (
+              ) : user.status === "pending" ? (
                 <>
                   <Clock className="h-6 w-6 text-orange-600" />
                   <span className="text-orange-800 font-semibold text-lg">আপনার আবেদন পর্যালোচনাধীন</span>
+                </>
+              ) : (
+                <>
+                  <div className="h-6 w-6 text-red-600">✕</div>
+                  <span className="text-red-800 font-semibold text-lg">আপনার আবেদন প্রত্যাখ্যাত হয়েছে</span>
                 </>
               )}
             </div>
@@ -226,11 +235,13 @@ ${user.status === "approved" ? "এই ব্যক্তি পেন প্য
                   </div>
                   <div className="flex justify-between">
                     <span className="font-medium text-gray-600">ইউজার নম্বর:</span>
-                    <span className="font-bold text-gray-900">{user.userNumber}</span>
+                    <span className="font-bold text-gray-900">{user.user_number}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-medium text-gray-600">তারিখ:</span>
-                    <span className="text-gray-900">{user.registrationDate}</span>
+                    <span className="text-gray-900">
+                      {new Date(user.registration_date).toLocaleDateString("bn-BD")}
+                    </span>
                   </div>
                 </CardContent>
               </Card>
@@ -249,7 +260,7 @@ ${user.status === "approved" ? "এই ব্যক্তি পেন প্য
                   </div>
                   <div>
                     <span className="font-medium text-gray-600 block">ফোন:</span>
-                    <span className="text-gray-900">{user.phone}</span>
+                    <span className="text-gray-900">{user.phone || "প্রদান করা হয়নি"}</span>
                   </div>
                 </div>
                 {user.email && (
@@ -263,10 +274,24 @@ ${user.status === "approved" ? "এই ব্যক্তি পেন প্য
 
             {/* Status Information */}
             <Card
-              className={`mb-8 ${user.status === "approved" ? "bg-green-50 border-green-200" : "bg-orange-50 border-orange-200"}`}
+              className={`mb-8 ${
+                user.status === "approved"
+                  ? "bg-green-50 border-green-200"
+                  : user.status === "pending"
+                    ? "bg-orange-50 border-orange-200"
+                    : "bg-red-50 border-red-200"
+              }`}
             >
               <CardHeader>
-                <CardTitle className={`text-lg ${user.status === "approved" ? "text-green-700" : "text-orange-700"}`}>
+                <CardTitle
+                  className={`text-lg ${
+                    user.status === "approved"
+                      ? "text-green-700"
+                      : user.status === "pending"
+                        ? "text-orange-700"
+                        : "text-red-700"
+                  }`}
+                >
                   বর্তমান স্ট্যাটাস
                 </CardTitle>
               </CardHeader>
@@ -275,9 +300,15 @@ ${user.status === "approved" ? "এই ব্যক্তি পেন প্য
                   <div>
                     <Badge
                       variant={user.status === "approved" ? "default" : "secondary"}
-                      className={`text-lg px-4 py-2 ${user.status === "approved" ? "bg-green-600" : "bg-orange-600"}`}
+                      className={`text-lg px-4 py-2 ${
+                        user.status === "approved"
+                          ? "bg-green-600"
+                          : user.status === "pending"
+                            ? "bg-orange-600"
+                            : "bg-red-600"
+                      }`}
                     >
-                      {user.status === "approved" ? "অনুমোদিত" : "অপেক্ষমান"}
+                      {user.status === "approved" ? "অনুমোদিত" : user.status === "pending" ? "অপেক্ষমান" : "প্রত্যাখ্যাত"}
                     </Badge>
                   </div>
                   {user.status === "approved" && (
@@ -298,9 +329,13 @@ ${user.status === "approved" ? "এই ব্যক্তি পেন প্য
                       <strong>অভিনন্দন!</strong> আপনার আবেদন অনুমোদিত হয়েছে। আপনি এখন পেন প্যাকিং কাজ শুরু করতে পারেন। আরও তথ্যের
                       জন্য আমাদের সাথে যোগাযোগ করুন।
                     </p>
-                  ) : (
+                  ) : user.status === "pending" ? (
                     <p className="text-orange-800">
                       আপনার আবেদনটি বর্তমানে পর্যালোচনাধীন রয়েছে। অনুগ্রহ করে ধৈর্য ধরুন। আমরা শীঘ্রই আপনাকে আপডেট দেব।
+                    </p>
+                  ) : (
+                    <p className="text-red-800">
+                      দুঃখিত, আপনার আবেদনটি প্রত্যাখ্যাত হয়েছে। আরও তথ্যের জন্য আমাদের সাথে যোগাযোগ করুন।
                     </p>
                   )}
                 </div>

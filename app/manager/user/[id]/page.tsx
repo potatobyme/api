@@ -12,75 +12,26 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
-
-// Example data - in a real app, this would be fetched from an API
-const usersData = {
-  PPJ001: {
-    id: "PPJ001",
-    userNumber: "1001",
-    name: "রহিম আহমেদ",
-    age: 28,
-    gender: "পুরুষ",
-    address: "১২৩ মেইন স্ট্রিট, ঢাকা, বাংলাদেশ",
-    phone: "+880 1712-345678",
-    email: "rahim@example.com",
-    status: "approved",
-    registrationDate: "১৫-০১-২০২৪",
-    lastUpdated: "২০-০১-২০২৪",
-  },
-  PPJ002: {
-    id: "PPJ002",
-    userNumber: "1002",
-    name: "ফাতেমা বেগম",
-    age: 32,
-    gender: "মহিলা",
-    address: "৪৫৬ লেক রোড, খুলনা, বাংলাদেশ",
-    phone: "+880 1812-345678",
-    email: "fatema@example.com",
-    status: "pending",
-    registrationDate: "১৬-০১-২০২৪",
-    lastUpdated: "১৬-০১-২০২৪",
-  },
-  PPJ003: {
-    id: "PPJ003",
-    userNumber: "1003",
-    name: "করিম মিয়া",
-    age: 25,
-    gender: "পুরুষ",
-    address: "৭৮৯ স্টেশন রোড, রাজশাহী, বাংলাদেশ",
-    phone: "+880 1912-345678",
-    email: "karim@example.com",
-    status: "approved",
-    registrationDate: "১৭-০১-২০২৪",
-    lastUpdated: "১৮-০১-২০২৪",
-  },
-}
+import { supabase, type User } from "@/lib/supabase"
 
 export default function UserDetails({ params }: { params: { id: string } }) {
   const { toast } = useToast()
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<User | null>(null)
   const [isEditing, setIsEditing] = useState(false)
-  const [editData, setEditData] = useState<any>(null)
+  const [editData, setEditData] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
-    // Fetch user data from localStorage
     const fetchUser = async () => {
       setIsLoading(true)
       try {
-        // Get users from localStorage
-        const storedUsers = localStorage.getItem("penPackingUsers")
-        let allUsers = []
+        const { data: userData, error } = await supabase.from("users").select("*").eq("id", params.id).single()
 
-        if (storedUsers) {
-          allUsers = JSON.parse(storedUsers)
-        } else {
-          // If no stored users, use the default data
-          allUsers = Object.values(usersData)
-          localStorage.setItem("penPackingUsers", JSON.stringify(allUsers))
+        if (error && error.code !== "PGRST116") {
+          throw error
         }
 
-        const userData = allUsers.find((user: any) => user.id === params.id)
         if (userData) {
           setUser(userData)
           setEditData(userData)
@@ -100,41 +51,49 @@ export default function UserDetails({ params }: { params: { id: string } }) {
     fetchUser()
   }, [params.id, toast])
 
-  const handleSave = () => {
-    // Update user in localStorage
-    const storedUsers = JSON.parse(localStorage.getItem("penPackingUsers") || "[]")
-    const updatedUsers = storedUsers.map((u: any) =>
-      u.id === user.id
-        ? {
-            ...editData,
-            lastUpdated: new Date().toLocaleDateString("bn-BD", {
-              year: "numeric",
-              month: "2-digit",
-              day: "2-digit",
-            }),
-          }
-        : u,
-    )
+  const handleSave = async () => {
+    if (!editData) return
 
-    localStorage.setItem("penPackingUsers", JSON.stringify(updatedUsers))
+    setIsSaving(true)
+    try {
+      const { error } = await supabase
+        .from("users")
+        .update({
+          name: editData.name,
+          age: editData.age,
+          gender: editData.gender,
+          address: editData.address,
+          phone: editData.phone,
+          email: editData.email,
+          last_updated: new Date().toISOString(),
+        })
+        .eq("id", user!.id)
 
-    // Update local state
-    const updatedUser = {
-      ...editData,
-      lastUpdated: new Date().toLocaleDateString("bn-BD", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }),
+      if (error) throw error
+
+      // Update local state
+      const updatedUser = {
+        ...editData,
+        last_updated: new Date().toISOString(),
+      }
+
+      setUser(updatedUser)
+      setIsEditing(false)
+
+      toast({
+        title: "সফল",
+        description: "ব্যবহারকারীর তথ্য সফলভাবে আপডেট করা হয়েছে",
+      })
+    } catch (error) {
+      console.error("Error updating user:", error)
+      toast({
+        title: "ত্রুটি",
+        description: "তথ্য আপডেট করতে সমস্যা হয়েছে",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSaving(false)
     }
-
-    setUser(updatedUser)
-    setIsEditing(false)
-
-    toast({
-      title: "সফল",
-      description: "ব্যবহারকারীর তথ্য সফলভাবে আপডেট করা হয়েছে",
-    })
   }
 
   const handleCancel = () => {
@@ -142,29 +101,57 @@ export default function UserDetails({ params }: { params: { id: string } }) {
     setIsEditing(false)
   }
 
+  const updateStatus = async (newStatus: string) => {
+    if (!user) return
+
+    try {
+      const { error } = await supabase
+        .from("users")
+        .update({
+          status: newStatus,
+          last_updated: new Date().toISOString(),
+        })
+        .eq("id", user.id)
+
+      if (error) throw error
+
+      setUser({ ...user, status: newStatus as any })
+
+      toast({
+        title: "সফল",
+        description: "স্ট্যাটাস আপডেট করা হয়েছে",
+      })
+    } catch (error) {
+      console.error("Error updating status:", error)
+      toast({
+        title: "ত্রুটি",
+        description: "স্ট্যাটাস আপডেট করতে সমস্যা হয়েছে",
+        variant: "destructive",
+      })
+    }
+  }
+
   const generatePDF = () => {
     if (!user) return
 
-    // In a real app, this would generate and download a PDF
     const pdfContent = `
       পেন প্যাকিং জব - ব্যবহারকারী রেজিস্ট্রেশন বিবরণ
       
       ইউজার আইডি: ${user.id}
-      ইউজার নম্বর: ${user.userNumber}
+      ইউজার নম্বর: ${user.user_number}
       নাম: ${user.name}
       বয়স: ${user.age}
       লিঙ্গ: ${user.gender}
       ঠিকানা: ${user.address}
-      ফোন: ${user.phone}
-      ইমেইল: ${user.email}
-      স্ট্যাটাস: ${user.status === "approved" ? "অনুমোদিত" : "অপেক্ষমান"}
-      রেজিস্ট্রেশন তারিখ: ${user.registrationDate}
-      সর্বশেষ আপডেট: ${user.lastUpdated}
+      ফোন: ${user.phone || "প্রদান করা হয়নি"}
+      ইমেইল: ${user.email || "প্রদান করা হয়নি"}
+      স্ট্যাটাস: ${user.status === "approved" ? "অনুমোদিত" : user.status === "pending" ? "অপেক্ষমান" : "প্রত্যাখ্যাত"}
+      রেজিস্ট্রেশন তারিখ: ${new Date(user.registration_date).toLocaleDateString("bn-BD")}
+      সর্বশেষ আপডেট: ${new Date(user.last_updated).toLocaleDateString("bn-BD")}
       
       তৈরি করা হয়েছে: ${new Date().toLocaleDateString("bn-BD")}
     `
 
-    // Create and download blob
     const blob = new Blob([pdfContent], { type: "text/plain" })
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
@@ -257,12 +244,21 @@ export default function UserDetails({ params }: { params: { id: string } }) {
                   <div>
                     <CardTitle className="flex items-center space-x-2">
                       <span>রেজিস্ট্রেশন বিবরণ</span>
-                      <Badge variant={user.status === "approved" ? "default" : "secondary"}>
-                        {user.status === "approved" ? "অনুমোদিত" : "অপেক্ষমান"}
+                      <Badge
+                        variant={
+                          user.status === "approved"
+                            ? "default"
+                            : user.status === "pending"
+                              ? "secondary"
+                              : "destructive"
+                        }
+                      >
+                        {user.status === "approved" ? "অনুমোদিত" : user.status === "pending" ? "অপেক্ষমান" : "প্রত্যাখ্যাত"}
                       </Badge>
                     </CardTitle>
                     <CardDescription>
-                      ইউজার আইডি: {user.id} • ইউজার নম্বর: {user.userNumber} • রেজিস্ট্রেশন: {user.registrationDate}
+                      ইউজার আইডি: {user.id} • ইউজার নম্বর: {user.user_number} • রেজিস্ট্রেশন:{" "}
+                      {new Date(user.registration_date).toLocaleDateString("bn-BD")}
                     </CardDescription>
                   </div>
                   {!isEditing ? (
@@ -272,11 +268,11 @@ export default function UserDetails({ params }: { params: { id: string } }) {
                     </Button>
                   ) : (
                     <div className="flex space-x-2">
-                      <Button onClick={handleSave} size="sm">
+                      <Button onClick={handleSave} size="sm" disabled={isSaving}>
                         <Save className="h-4 w-4 mr-2" />
-                        সংরক্ষণ
+                        {isSaving ? "সংরক্ষণ..." : "সংরক্ষণ"}
                       </Button>
-                      <Button onClick={handleCancel} variant="outline" size="sm">
+                      <Button onClick={handleCancel} variant="outline" size="sm" disabled={isSaving}>
                         <X className="h-4 w-4 mr-2" />
                         বাতিল
                       </Button>
@@ -295,8 +291,9 @@ export default function UserDetails({ params }: { params: { id: string } }) {
                       {isEditing ? (
                         <Input
                           id="name"
-                          value={editData.name}
-                          onChange={(e) => setEditData({ ...editData, name: e.target.value })}
+                          value={editData?.name || ""}
+                          onChange={(e) => setEditData(editData ? { ...editData, name: e.target.value } : null)}
+                          disabled={isSaving}
                         />
                       ) : (
                         <p className="text-sm text-gray-900 bg-gray-50 p-2 rounded">{user.name}</p>
@@ -309,8 +306,11 @@ export default function UserDetails({ params }: { params: { id: string } }) {
                         <Input
                           id="age"
                           type="number"
-                          value={editData.age}
-                          onChange={(e) => setEditData({ ...editData, age: Number.parseInt(e.target.value) })}
+                          value={editData?.age || ""}
+                          onChange={(e) =>
+                            setEditData(editData ? { ...editData, age: Number.parseInt(e.target.value) } : null)
+                          }
+                          disabled={isSaving}
                         />
                       ) : (
                         <p className="text-sm text-gray-900 bg-gray-50 p-2 rounded">{user.age}</p>
@@ -322,8 +322,9 @@ export default function UserDetails({ params }: { params: { id: string } }) {
                     <Label htmlFor="gender">লিঙ্গ</Label>
                     {isEditing ? (
                       <Select
-                        value={editData.gender}
-                        onValueChange={(value) => setEditData({ ...editData, gender: value })}
+                        value={editData?.gender || ""}
+                        onValueChange={(value) => setEditData(editData ? { ...editData, gender: value } : null)}
+                        disabled={isSaving}
                       >
                         <SelectTrigger>
                           <SelectValue />
@@ -349,9 +350,10 @@ export default function UserDetails({ params }: { params: { id: string } }) {
                     {isEditing ? (
                       <Textarea
                         id="address"
-                        value={editData.address}
-                        onChange={(e) => setEditData({ ...editData, address: e.target.value })}
+                        value={editData?.address || ""}
+                        onChange={(e) => setEditData(editData ? { ...editData, address: e.target.value } : null)}
                         className="min-h-[80px]"
+                        disabled={isSaving}
                       />
                     ) : (
                       <p className="text-sm text-gray-900 bg-gray-50 p-2 rounded">{user.address}</p>
@@ -364,11 +366,12 @@ export default function UserDetails({ params }: { params: { id: string } }) {
                       {isEditing ? (
                         <Input
                           id="phone"
-                          value={editData.phone}
-                          onChange={(e) => setEditData({ ...editData, phone: e.target.value })}
+                          value={editData?.phone || ""}
+                          onChange={(e) => setEditData(editData ? { ...editData, phone: e.target.value } : null)}
+                          disabled={isSaving}
                         />
                       ) : (
-                        <p className="text-sm text-gray-900 bg-gray-50 p-2 rounded">{user.phone}</p>
+                        <p className="text-sm text-gray-900 bg-gray-50 p-2 rounded">{user.phone || "প্রদান করা হয়নি"}</p>
                       )}
                     </div>
 
@@ -378,11 +381,12 @@ export default function UserDetails({ params }: { params: { id: string } }) {
                         <Input
                           id="email"
                           type="email"
-                          value={editData.email}
-                          onChange={(e) => setEditData({ ...editData, email: e.target.value })}
+                          value={editData?.email || ""}
+                          onChange={(e) => setEditData(editData ? { ...editData, email: e.target.value } : null)}
+                          disabled={isSaving}
                         />
                       ) : (
-                        <p className="text-sm text-gray-900 bg-gray-50 p-2 rounded">{user.email}</p>
+                        <p className="text-sm text-gray-900 bg-gray-50 p-2 rounded">{user.email || "প্রদান করা হয়নি"}</p>
                       )}
                     </div>
                   </div>
@@ -400,7 +404,7 @@ export default function UserDetails({ params }: { params: { id: string } }) {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>বর্তমান স্ট্যাটাস</Label>
-                  <Select value={user.status} onValueChange={(value) => setUser({ ...user, status: value })}>
+                  <Select value={user.status} onValueChange={updateStatus}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -416,12 +420,12 @@ export default function UserDetails({ params }: { params: { id: string } }) {
                   <p className="text-sm text-gray-600">
                     <strong>রেজিস্ট্রেশন তারিখ:</strong>
                     <br />
-                    {user.registrationDate}
+                    {new Date(user.registration_date).toLocaleDateString("bn-BD")}
                   </p>
                   <p className="text-sm text-gray-600">
                     <strong>সর্বশেষ আপডেট:</strong>
                     <br />
-                    {user.lastUpdated}
+                    {new Date(user.last_updated).toLocaleDateString("bn-BD")}
                   </p>
                 </div>
               </CardContent>

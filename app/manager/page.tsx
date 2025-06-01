@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Plus, Users, Download, Eye, Search } from "lucide-react"
+import { Plus, Users, Download, Eye, Search, RefreshCw } from "lucide-react"
 import Link from "next/link"
 
 import { Button } from "@/components/ui/button"
@@ -10,84 +10,40 @@ import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-
-// Example data structure - would be replaced with API calls in production
-const initialUsers = [
-  {
-    id: "PPJ001",
-    userNumber: "1001",
-    name: "রহিম আহমেদ",
-    age: 28,
-    gender: "পুরুষ",
-    address: "১২৩ মেইন স্ট্রিট, ঢাকা, বাংলাদেশ",
-    phone: "+880 1712-345678",
-    status: "approved",
-    registrationDate: "১৫-০১-২০২৪",
-  },
-  {
-    id: "PPJ002",
-    userNumber: "1002",
-    name: "ফাতেমা বেগম",
-    age: 32,
-    gender: "মহিলা",
-    address: "৪৫৬ লেক রোড, খুলনা, বাংলাদেশ",
-    phone: "+880 1812-345678",
-    status: "pending",
-    registrationDate: "১৬-০১-২০২৪",
-  },
-  {
-    id: "PPJ003",
-    userNumber: "1003",
-    name: "করিম মিয়া",
-    age: 25,
-    gender: "পুরুষ",
-    address: "৭৮৯ স্টেশন রোড, রাজশাহী, বাংলাদেশ",
-    phone: "+880 1912-345678",
-    status: "approved",
-    registrationDate: "১৭-০১-২০২৪",
-  },
-]
+import { supabase, type User } from "@/lib/supabase"
+import { useToast } from "@/hooks/use-toast"
 
 export default function ManagerDashboard() {
-  const [users, setUsers] = useState(initialUsers)
-
-  // Listen for new user additions
-  useEffect(() => {
-    const handleNewUser = (event: CustomEvent) => {
-      const newUser = event.detail
-      setUsers((prevUsers) => [...prevUsers, newUser])
-    }
-
-    // Listen for custom event when new user is added
-    window.addEventListener("userAdded", handleNewUser as EventListener)
-
-    // Also check localStorage for any new users on component mount
-    const checkForNewUsers = () => {
-      const storedUsers = localStorage.getItem("penPackingUsers")
-      if (storedUsers) {
-        try {
-          const parsedUsers = JSON.parse(storedUsers)
-          setUsers(parsedUsers)
-        } catch (error) {
-          console.error("Error parsing stored users:", error)
-        }
-      }
-    }
-
-    checkForNewUsers()
-
-    return () => {
-      window.removeEventListener("userAdded", handleNewUser as EventListener)
-    }
-  }, [])
-
-  // Save users to localStorage whenever users state changes
-  useEffect(() => {
-    localStorage.setItem("penPackingUsers", JSON.stringify(users))
-  }, [users])
-
+  const { toast } = useToast()
+  const [users, setUsers] = useState<User[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState("all")
   const [searchQuery, setSearchQuery] = useState("")
+
+  // Fetch users from database
+  const fetchUsers = async () => {
+    setIsLoading(true)
+    try {
+      const { data, error } = await supabase.from("users").select("*").order("created_at", { ascending: false })
+
+      if (error) throw error
+
+      setUsers(data || [])
+    } catch (error) {
+      console.error("Error fetching users:", error)
+      toast({
+        title: "ত্রুটি",
+        description: "ব্যবহারকারীদের তথ্য লোড করতে সমস্যা হয়েছে",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchUsers()
+  }, [])
 
   // Filter users based on status and search query
   const filteredUsers = users.filter(
@@ -95,17 +51,53 @@ export default function ManagerDashboard() {
       (statusFilter === "all" || user.status === statusFilter) &&
       (searchQuery === "" ||
         user.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.userNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        user.user_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
         user.name.toLowerCase().includes(searchQuery.toLowerCase())),
   )
 
-  const updateUserStatus = (userId: string, newStatus: string) => {
-    setUsers(users.map((user) => (user.id === userId ? { ...user, status: newStatus } : user)))
+  const updateUserStatus = async (userId: string, newStatus: string) => {
+    try {
+      const { error } = await supabase
+        .from("users")
+        .update({
+          status: newStatus,
+          last_updated: new Date().toISOString(),
+        })
+        .eq("id", userId)
+
+      if (error) throw error
+
+      // Update local state
+      setUsers(users.map((user) => (user.id === userId ? { ...user, status: newStatus as any } : user)))
+
+      toast({
+        title: "সফল",
+        description: "ব্যবহারকারীর স্ট্যাটাস আপডেট করা হয়েছে",
+      })
+    } catch (error) {
+      console.error("Error updating user status:", error)
+      toast({
+        title: "ত্রুটি",
+        description: "স্ট্যাটাস আপডেট করতে সমস্যা হয়েছে",
+        variant: "destructive",
+      })
+    }
   }
 
-  const generatePDF = (user: any) => {
+  const generatePDF = (user: User) => {
     // In a real app, this would generate and download a PDF
     alert(`${user.name} (${user.id}) এর জন্য পিডিএফ তৈরি করা হচ্ছে`)
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">তথ্য লোড হচ্ছে...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -119,6 +111,10 @@ export default function ManagerDashboard() {
               <h1 className="text-2xl font-bold text-gray-900">ম্যানেজার প্যানেল</h1>
             </div>
             <div className="flex space-x-2">
+              <Button onClick={fetchUsers} variant="outline" size="sm">
+                <RefreshCw className="h-4 w-4 mr-2" />
+                রিফ্রেশ
+              </Button>
               <Link href="/">
                 <Button variant="outline">হোম পেজে ফিরুন</Button>
               </Link>
@@ -135,7 +131,7 @@ export default function ManagerDashboard() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Stats Cards */}
-        <div className="grid md:grid-cols-3 gap-6 mb-8">
+        <div className="grid md:grid-cols-4 gap-6 mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">মোট ব্যবহারকারী</CardTitle>
@@ -173,6 +169,20 @@ export default function ManagerDashboard() {
               </div>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">প্রত্যাখ্যাত</CardTitle>
+              <Badge variant="destructive" className="text-xs">
+                বাতিল
+              </Badge>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-red-600">
+                {users.filter((u) => u.status === "rejected").length}
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Search and Filter */}
@@ -194,6 +204,7 @@ export default function ManagerDashboard() {
               <SelectItem value="all">সব স্ট্যাটাস</SelectItem>
               <SelectItem value="approved">অনুমোদিত</SelectItem>
               <SelectItem value="pending">অপেক্ষমান</SelectItem>
+              <SelectItem value="rejected">প্রত্যাখ্যাত</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -233,14 +244,22 @@ export default function ManagerDashboard() {
                   filteredUsers.map((user) => (
                     <TableRow key={user.id}>
                       <TableCell className="font-medium">{user.id}</TableCell>
-                      <TableCell>{user.userNumber}</TableCell>
+                      <TableCell>{user.user_number}</TableCell>
                       <TableCell>{user.name}</TableCell>
                       <TableCell>{user.age}</TableCell>
                       <TableCell>{user.gender}</TableCell>
-                      <TableCell>{user.registrationDate}</TableCell>
+                      <TableCell>{new Date(user.registration_date).toLocaleDateString("bn-BD")}</TableCell>
                       <TableCell>
-                        <Badge variant={user.status === "approved" ? "default" : "secondary"}>
-                          {user.status === "approved" ? "অনুমোদিত" : "অপেক্ষমান"}
+                        <Badge
+                          variant={
+                            user.status === "approved"
+                              ? "default"
+                              : user.status === "pending"
+                                ? "secondary"
+                                : "destructive"
+                          }
+                        >
+                          {user.status === "approved" ? "অনুমোদিত" : user.status === "pending" ? "অপেক্ষমান" : "প্রত্যাখ্যাত"}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -254,12 +273,13 @@ export default function ManagerDashboard() {
                             <Download className="h-4 w-4" />
                           </Button>
                           <Select value={user.status} onValueChange={(value) => updateUserStatus(user.id, value)}>
-                            <SelectTrigger className="w-24 h-8">
+                            <SelectTrigger className="w-28 h-8">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="pending">অপেক্ষমান</SelectItem>
                               <SelectItem value="approved">অনুমোদিত</SelectItem>
+                              <SelectItem value="rejected">প্রত্যাখ্যাত</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
